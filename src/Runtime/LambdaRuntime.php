@@ -5,6 +5,7 @@ namespace Bref\Runtime;
 use Bref\Context\Context;
 use Bref\Context\ContextBuilder;
 use Bref\Event\Handler;
+use Bref\Timeout\Timeout;
 use Exception;
 use Psr\Http\Server\RequestHandlerInterface;
 
@@ -42,12 +43,15 @@ final class LambdaRuntime
     /** @var Invoker */
     private $invoker;
 
+    /** @var bool */
+    private $enableTimeout;
+
     public static function fromEnvironmentVariable(): self
     {
-        return new self((string) getenv('AWS_LAMBDA_RUNTIME_API'));
+        return new self((string) getenv('AWS_LAMBDA_RUNTIME_API'), (bool) getenv('BREF_FEATURE_TIMEOUT'));
     }
 
-    public function __construct(string $apiUrl)
+    private function __construct(string $apiUrl, bool $enableTimeout)
     {
         if ($apiUrl === '') {
             die('At the moment lambdas can only be executed in an Lambda environment');
@@ -55,6 +59,7 @@ final class LambdaRuntime
 
         $this->apiUrl = $apiUrl;
         $this->invoker = new Invoker;
+        $this->enableTimeout = $enableTimeout;
     }
 
     public function __destruct()
@@ -96,6 +101,12 @@ final class LambdaRuntime
         [$event, $context] = $this->waitNextInvocation();
         \assert($context instanceof Context);
 
+        $remainingTimeInMillis = $context->getRemainingTimeInMillis();
+        if ($this->enableTimeout && 0 < $remainingTimeInMillis) {
+            // Throw exception one second before Lambda pulls the plug.
+            Timeout::enable($context->getRemainingTimeInMillis());
+        }
+
         $this->ping();
 
         try {
@@ -104,6 +115,8 @@ final class LambdaRuntime
             $this->sendResponse($context->getAwsRequestId(), $result);
         } catch (\Throwable $e) {
             $this->signalFailure($context->getAwsRequestId(), $e);
+        } finally {
+            Timeout::reset();
         }
     }
 

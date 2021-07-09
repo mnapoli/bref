@@ -15,6 +15,8 @@ use Bref\Event\Sqs\SqsEvent;
 use Bref\Event\Sqs\SqsHandler;
 use Bref\Runtime\LambdaRuntime;
 use Bref\Test\Server;
+use Bref\Timeout\LambdaTimeout;
+use Bref\Timeout\Timeout;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -35,13 +37,41 @@ class LambdaRuntimeTest extends TestCase
     {
         ob_start();
         Server::start();
-        $this->runtime = new LambdaRuntime('localhost:8126');
+        // Mock the API with our test server
+        putenv('AWS_LAMBDA_RUNTIME_API=localhost:8126');
+        $this->runtime = LambdaRuntime::fromEnvironmentVariable();
     }
 
     protected function tearDown(): void
     {
         Server::stop();
         ob_end_clean();
+        // Cleanup
+        putenv('AWS_LAMBDA_RUNTIME_API=');
+        putenv('BREF_FEATURE_TIMEOUT=');
+    }
+
+    public function test Lambda timeouts can be anticipated()
+    {
+        // Re-create the runtime class with timeout prevention enabled
+        putenv('BREF_FEATURE_TIMEOUT=1');
+        $this->runtime = LambdaRuntime::fromEnvironmentVariable();
+
+        $this->givenAnEvent([]);
+
+        $start = microtime(true);
+        $this->runtime->processNextEvent(function () {
+            // This 10s sleep should be interrupted
+            sleep(10);
+        });
+
+        $elapsedTime = microtime(true) - $start;
+        // The Lambda timeout was 2 seconds, we expect the Bref timeout to trigger 1 second before that: 1 second
+        $this->assertEqualsWithDelta(1, $elapsedTime, 0.2);
+        Timeout::reset();
+
+        $this->assertInvocationErrorResult(LambdaTimeout::class, 'Maximum AWS Lambda execution time reached');
+        $this->assertErrorInLogs(LambdaTimeout::class, 'Maximum AWS Lambda execution time reached');
     }
 
     public function test basic behavior()
@@ -348,6 +378,8 @@ ERROR;
                 [
                     'lambda-runtime-aws-request-id' => '1',
                     'lambda-runtime-invoked-function-arn' => 'test-function-name',
+                    // now + 2 seconds
+                    'lambda-runtime-deadline-ms' => intval((microtime(true) + 2) * 1000),
                 ],
                 json_encode($event)
             ),

@@ -54,6 +54,8 @@ When possible, an alternative to NAT Gateways is to split the work done by a lam
 
 Finally, another free alternative to NAT Gateway is to access AWS services by creating "*private VPC endpoints*": this is possible for S3, API Gateway, [and more](https://docs.aws.amazon.com/en_pv/vpc/latest/userguide/vpc-endpoints-access.html).
 
+Read more in the section about [timeouts](/docs/environment/timeouts.md).
+
 ## Creating a database
 
 On the [RDS console](https://console.aws.amazon.com/rds/home):

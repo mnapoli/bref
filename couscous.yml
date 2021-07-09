@@ -114,6 +114,10 @@ menu:
                     text: Databases
                     url: /docs/environment/database.html
                     title: Using a database from AWS Lambda
+                timeouts:
+                    text: Timeouts
+                    url: /docs/environment/timeouts.html
+                    title: Configure and handle timeouts
                 custom-domains:
                     text: Custom domains
                     url: /docs/environment/custom-domains.html

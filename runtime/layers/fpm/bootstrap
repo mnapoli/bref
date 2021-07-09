@@ -7,6 +7,15 @@ use Bref\Runtime\LambdaRuntime;
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
 
+/**
+ * Disable the Bref timeout feature in the main bootstrap process.
+ * Indeed it doesn't make sense here because the application code runs in the
+ * FPM worker process, not in this process (the bootstrap process). We don't want to
+ * terminate the bootstrap process while leaving the FPM worker running.
+ * That's why we force `BREF_FEATURE_TIMEOUT` to be disabled.
+ */
+putenv('BREF_FEATURE_TIMEOUT=0');
+
 $appRoot = getenv('LAMBDA_TASK_ROOT');
 
 if (getenv('BREF_DOWNLOAD_VENDOR')) {

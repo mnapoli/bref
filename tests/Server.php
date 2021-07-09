@@ -140,6 +140,13 @@ class Server
         if (self::$started) {
             self::getClient()->request('DELETE', 'guzzle-server');
         }
+        $tries = 0;
+        while (self::isListening() && ++$tries < 5) {
+            usleep(100000);
+        }
+        if (self::isListening()) {
+            throw new \RuntimeException('Unable to stop node.js server');
+        }
         self::$started = false;
     }
 
@@ -159,11 +166,12 @@ class Server
         if (self::$started) {
             return;
         }
-        if (! self::isListening()) {
-            exec('node ' . __DIR__ . '/server.js '
-                . self::$port . ' >> /tmp/server.log 2>&1 &');
-            self::wait();
+        if (self::isListening()) {
+            throw new \Exception('Server is already running');
         }
+        exec('node ' . __DIR__ . '/server.js '
+            . self::$port . ' >> /tmp/server.log 2>&1 &');
+        self::wait();
         self::$started = true;
     }
 
