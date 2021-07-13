@@ -46,12 +46,12 @@ To run a console command on AWS Lambda, run `bref cli` on your computer:
 vendor/bin/bref cli <function-name> -- <command>
 ```
 
-`<function-name>` is the name of the function that was deployed on AWS. In our example above that would be `hello-dev` because Serverless adds the stage (by default `dev`) as a suffix.
+`<function-name>` is the name of the function that was define in `serverless.yml`. In our example above that would be `hello`.
 
 Pass your command, arguments and options by putting them after `--`. The `--` delimiter separates between options for the `bref cli` command (before `--`) and your command (after `--`).
 
 ```bash
-vendor/bin/bref cli hello-dev <bref options> -- <your command, your options>
+vendor/bin/bref cli hello <bref options> -- <your command, your options>
 ```
 
 For example:
@@ -61,11 +61,11 @@ For example:
 $ vendor/bin/bref cli hello-dev
 # ...
 
-$ vendor/bin/bref cli hello-dev -- doctrine:migrations:migrate
+$ vendor/bin/bref cli hello -- doctrine:migrations:migrate
 Your database will be migrated.
 To execute the SQL queries run the command with the `--force` option.
 
-$ vendor/bin/bref cli hello-dev -- doctrine:migrations:migrate --force
+$ vendor/bin/bref cli hello -- doctrine:migrations:migrate --force
 Your database has been migrated.
 
 # Use environment variables to configure your AWS credentials

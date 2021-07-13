@@ -11,6 +11,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
+use Symfony\Component\Yaml\Yaml;
 
 if (file_exists(__DIR__ . '/vendor/autoload.php')) {
     require_once __DIR__ . '/vendor/autoload.php';
@@ -20,6 +21,63 @@ if (file_exists(__DIR__ . '/vendor/autoload.php')) {
 } else {
     /** @noinspection PhpIncludeInspection */
     require_once __DIR__ . '/../../autoload.php';
+}
+
+function getServerlessInfo($stage, $profile, $io): array
+{
+    $command = ['serverless', 'info', '--aws-profile', $profile];
+
+    if ($stage) {
+        $command += ['--stage', $stage];
+    }
+
+    // serverless print deprecation message on stdout instead of stderr. We need to disable it to parse the outpout
+    $serverlessInfo = new Symfony\Component\Process\Process(
+        $command,
+        null,
+        ['SLS_DEPRECATION_DISABLE'=>"*"]
+    );
+    $serverlessInfo->start();
+    $animation = new LoadingAnimation($io);
+    do {
+        $animation->tick('Retrieving the stack');
+        usleep(100 * 1000);
+    } while ($serverlessInfo->isRunning());
+    $animation->clear();
+
+    if (!$serverlessInfo->isSuccessful()) {
+        throw new Exception("'The command `serverless info` failed' ".PHP_EOL.$serverlessInfo->getOutput());
+    }
+
+    $serverlessInfoOutput = Yaml::parse( substr($serverlessInfo->getOutput(), strpos($serverlessInfo->getOutput(), "\n") + 1));
+
+    return ($serverlessInfoOutput);
+}
+
+function getFunctionWithConsoleLayer(): string
+{
+    if (!file_exists(__DIR__ . '/../../serverless.yml')) {
+        throw new Exception('serverless.yml not found');
+    }
+
+    $serverlessInfoOutput = Yaml::parse(file_get_contents(__DIR__ . '/../../serverless.yml'));
+    $nominatedFunctions = [];
+    foreach ($serverlessInfoOutput['functions'] as $functionName => $function) {
+        foreach ($function['layers'] as $layer) {
+            if (strpos($layer, 'layer.console') !==FALSE) {
+                $nominatedFunctions[] = $functionName;
+            }
+        }
+    }
+
+    if (sizeof($nominatedFunctions) == 0) {
+        throw new Exception('Layer console is missing');
+    }
+    if (sizeof($nominatedFunctions) > 1) {
+        throw new Exception('More than one function has the console layer. You can\'t use the default behavior');
+    }
+
+    return (reset($nominatedFunctions));
 }
 
 $app = new Silly\Application('Deploy serverless PHP applications');
@@ -91,13 +149,31 @@ $app->command('init', function (SymfonyStyle $io) {
 /**
  * Run a CLI command in the remote environment.
  */
-$app->command('cli function [--region=] [--profile=] [arguments]*', function (string $function, ?string $region, ?string $profile, array $arguments, SymfonyStyle $io) {
+$app->command('cli [function] [--profile=] [--stage=] [arguments]*', function (?string $function, ?string $profile, ?string $stage, array $arguments, SymfonyStyle $io) {
+
+    try {
+        if (!$function) {
+            $function= getFunctionWithConsoleLayer();
+        }
+    } catch (Exception $e) {
+        $io->error($e->getMessage());
+        return 1;
+    }
+
+
+    $profile = $profile ?: getenv('AWS_PROFILE') ?: 'default';
+    $serverlessInfo =getServerlessInfo($stage, $profile, $io);
+
     $lambda = new SimpleLambdaClient(
-        $region ?: getenv('AWS_DEFAULT_REGION') ?: 'us-east-1',
-        $profile ?: getenv('AWS_PROFILE') ?: 'default',
+        $serverlessInfo['region'],
+        $profile,
         15 * 60 // maximum duration on Lambda
     );
 
+    // Replace short function name (like in serverless.yml) by full qualified name
+    if (array_key_exists($function, $serverlessInfo['functions'])){
+        $function = $serverlessInfo['functions'][$function];
+    }
     // Because arguments may contain spaces, and are going to be executed remotely
     // as a separate process, we need to escape all arguments.
     $arguments = array_map(static function (string $arg): string {
@@ -166,36 +242,25 @@ $app->command('dashboard [--host=] [--port=] [--profile=] [--stage=]', function 
         return 1;
     }
 
-    $serverlessInfo = new Process(['serverless', 'info', '--stage', $stage, '--aws-profile', $profile]);
-    $serverlessInfo->start();
-    $animation = new LoadingAnimation($io);
-    do {
-        $animation->tick('Retrieving the stack');
-        usleep(100*1000);
-    } while ($serverlessInfo->isRunning());
-    $animation->clear();
-
-    if (!$serverlessInfo->isSuccessful()) {
-        $io->error('The command `serverless info` failed' . PHP_EOL . $serverlessInfo->getOutput());
+    try {
+        $serverlessInfo = getServerlessInfo($stage, $profile, $io);
+    }catch (\Exception $e) {
+        $io->error($e->getMessage());
 
         return 1;
     }
 
-    $serverlessInfoOutput = $serverlessInfo->getOutput();
-
-    $region = [];
-    preg_match('/region: ([a-z0-9-]*)/', $serverlessInfoOutput, $region);
-    $region = $region[1];
-
-    $stack = [];
-    preg_match('/stack: ([a-zA-Z0-9-]*)/', $serverlessInfoOutput, $stack);
-    $stack = $stack[1];
+    $region = $serverlessInfo['region'];
+    $stack = $serverlessInfo['stack'];
 
     $io->writeln("Stack: <fg=yellow>$stack ($region)</>");
 
     $dockerPull = new Process(['docker', 'pull', 'bref/dashboard']);
     $dockerPull->setTimeout(null);
     $dockerPull->start();
+
+    $animation = new LoadingAnimation($io);
+
     do {
         $animation->tick('Retrieving the latest version of the dashboard');
         usleep(100*1000);
