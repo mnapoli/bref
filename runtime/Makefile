@@ -6,7 +6,7 @@ publish: layers
 	cd layers ; php publish.php
 
 # Build the layers
-layers: export/console.zip export/php-73.zip export/php-74.zip export/php-80.zip export/php-73-fpm.zip export/php-74-fpm.zip export/php-80-fpm.zip
+layers: export/console.zip export/runtime.zip export/php-73.zip export/php-74.zip export/php-80.zip export/php-73-fpm.zip export/php-74-fpm.zip export/php-80-fpm.zip
 
 # The PHP runtimes
 export/php%.zip: docker-images
@@ -27,6 +27,11 @@ export/php%.zip: docker-images
 export/console.zip: layers/console/bootstrap
 	rm -f export/console.zip
 	cd layers/console && zip ../../export/console.zip bootstrap
+
+# The "Symfony runtime" runtime
+export/runtime.zip: layers/sf-runtime/bootstrap
+	rm -f export/runtime.zip
+	cd layers/sf-runtime && zip ../../export/runtime.zip bootstrap
 
 # Build Docker images
 docker-images:
@@ -53,6 +58,10 @@ docker-images:
 	cd layers/console ; docker build -t bref/php-73-console --build-arg PHP_VERSION=73 .
 	cd layers/console ; docker build -t bref/php-74-console --build-arg PHP_VERSION=74 .
 	cd layers/console ; docker build -t bref/php-80-console --build-arg PHP_VERSION=80 .
+	# - sf-runtime
+	cd layers/sf-runtime ; docker build -t bref/php-73-runtime --build-arg PHP_VERSION=73 .
+	cd layers/sf-runtime ; docker build -t bref/php-74-runtime --build-arg PHP_VERSION=74 .
+	cd layers/sf-runtime ; docker build -t bref/php-80-runtime --build-arg PHP_VERSION=80 .
 	# Other Docker images
 	cd layers/fpm-dev ; docker build -t bref/php-73-fpm-dev --build-arg PHP_VERSION=73 .
 	cd layers/fpm-dev ; docker build -t bref/php-74-fpm-dev --build-arg PHP_VERSION=74 .

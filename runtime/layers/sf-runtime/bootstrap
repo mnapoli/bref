@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# Fail on error
+set -e
+
+LAMBDA_ARGV=(${_HANDLER//:/ })
+
+while true
+do
+    # We redirect stderr to stdout so that everything
+    # written on the output ends up in Cloudwatch automatically
+    /opt/bin/php "${LAMBDA_ARGV[0]}" 2>&1
+done
