@@ -49,6 +49,11 @@ final class FpmHandler extends HttpHandler
     /** @var Process|null */
     private $fpm;
 
+    /** @var string */
+    private $lambdaRequestId;
+    /** @var string */
+    private $apiGatewayRequestId;
+
     public function __construct(string $handler, string $configFile = self::CONFIG)
     {
         $this->handler = $handler;
@@ -108,16 +113,19 @@ final class FpmHandler extends HttpHandler
      */
     public function handleRequest(HttpRequestEvent $event, Context $context): HttpResponse
     {
+        $this->lambdaRequestId = $context->getAwsRequestId();
+        $this->apiGatewayRequestId = $event->getRequestContext()['requestId'] ?? null;
+
         $request = $this->eventToFastCgiRequest($event, $context);
 
         try {
             $response = $this->client->sendRequest($this->connection, $request);
         } catch (Throwable $e) {
-            printf(
-                "Error communicating with PHP-FPM to read the HTTP response. A root cause of this can be that the Lambda (or PHP) timed out, for example when trying to connect to a remote API or database, if this happens continuously check for those! Bref will restart PHP-FPM now. Original exception message: %s %s\n",
+            $this->logToCloudwatch(sprintf(
+                'Error communicating with PHP-FPM to read the HTTP response. A root cause of this can be that the Lambda (or PHP) timed out, for example when trying to connect to a remote API or database, if this happens continuously check for those! Bref will restart PHP-FPM now. Original exception message: %s %s',
                 get_class($e),
                 $e->getMessage()
-            );
+            ));
 
             // Restart PHP-FPM: in some cases PHP-FPM is borked, that's the only way we can recover
             $this->stop();
@@ -221,7 +229,7 @@ final class FpmHandler extends HttpHandler
 
         // Never seen this happen but just in case
         if ($pid <= 0) {
-            echo "PHP-FPM's PID file contained an invalid PID, assuming PHP-FPM isn't running.\n";
+            $this->logToCloudwatch("PHP-FPM's PID file contained an invalid PID, assuming PHP-FPM isn't running.");
             unlink(self::SOCKET);
             unlink(self::PID_FILE);
             return;
@@ -243,12 +251,12 @@ final class FpmHandler extends HttpHandler
             return;
         }
 
-        echo "PHP-FPM seems to be running already. This might be because Lambda stopped the bootstrap process but didn't leave us an opportunity to stop PHP-FPM (did Lambda timeout?). Stopping PHP-FPM now to restart from a blank slate.\n";
+        $this->logToCloudwatch("PHP-FPM seems to be running already. This might be because Lambda stopped the bootstrap process but didn't leave us an opportunity to stop PHP-FPM (did Lambda timeout?). Stopping PHP-FPM now to restart from a blank slate.");
 
         // The previous PHP-FPM process is running, let's try to kill it properly
         $result = posix_kill($pid, self::SIGTERM);
         if ($result === false) {
-            echo "PHP-FPM's PID file contained a PID that doesn't exist, assuming PHP-FPM isn't running.\n";
+            $this->logToCloudwatch("PHP-FPM's PID file contained a PID that doesn't exist, assuming PHP-FPM isn't running.");
             unlink(self::SOCKET);
             unlink(self::PID_FILE);
             return;
@@ -281,5 +289,34 @@ final class FpmHandler extends HttpHandler
     private function getResponseHeaders(ProvidesResponseData $response): array
     {
         return array_change_key_case($response->getHeaders(), CASE_LOWER);
+    }
+
+    /**
+     * Log a message to Cloudwatch, this is specific for FPM related errors and will include AWS Request IDs for the
+     * current Lambda invocation and API Gateway (where applicable) to aid debugging any FPM-related issues.
+     */
+    private function logToCloudwatch(string $message): void
+    {
+        echo trim($message) . ' ' . json_encode($this->getLogContext()) . PHP_EOL;
+    }
+
+    /**
+     * Returns an array with AWS Request IDs for the current Lambda invocation and API Gateway (where applicable)
+     *
+     * @return string[]|array
+     */
+    private function getLogContext(): array
+    {
+        $logContext = [];
+
+        if ($this->lambdaRequestId) {
+            $logContext['requestId'] = $this->lambdaRequestId;
+        }
+
+        if ($this->apiGatewayRequestId) {
+            $logContext['apiGatewayRequestId'] = $this->apiGatewayRequestId;
+        }
+
+        return $logContext;
     }
 }
